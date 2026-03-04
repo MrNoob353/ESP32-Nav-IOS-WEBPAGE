@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>ESP32 Nav (Map-style)</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>ESP32 Navigation</h1>
+      <p>Auto-detect current location, enter destination name, and route there.</p>
+    </header>
+
+    <section class="card">
+      <h2>Step 1: ESP32 Connection</h2>
+      <div class="grid">
+        <label>Protocol
+          <select id="protocol"><option value="ws">WebSocket</option><option value="http">HTTP POST</option></select>
+        </label>
+        <label>ESP32 Host / IP<input id="host" type="text" value="192.168.4.1" /></label>
+        <label>Port<input id="port" type="number" value="80" /></label>
+        <label>Path<input id="path" type="text" value="/nav" /></label>
+      </div>
+      <div class="actions">
+        <button id="connectBtn">Connect</button>
+        <span id="connectionStatus" class="pill">Disconnected</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Step 2: Navigate</h2>
+      <div class="grid">
+        <label>Current Location<input id="currentLabel" type="text" value="Detecting..." readonly /></label>
+        <label>Destination Name<input id="destinationName" type="text" placeholder="Eiffel Tower" /></label>
+      </div>
+      <div class="actions">
+        <button id="locateBtn">Detect My Location</button>
+        <button id="routeBtn">Route to Destination</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+      <div id="map"></div>
+
+      <div class="metrics">
+        <div><span class="metric-label">Route Distance</span><strong id="distanceOut">--</strong></div>
+        <div><span class="metric-label">Route Duration</span><strong id="durationOut">--</strong></div>
+        <div><span class="metric-label">Initial Bearing</span><strong id="bearingOut">--</strong></div>
+      </div>
+
+      <div class="actions">
+        <button id="sendBtn" class="primary">Send to ESP32</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Directions</h2>
+      <ol id="steps" class="steps"></ol>
+    </section>
+
+    <section class="card">
+      <h2>Payload</h2>
+      <pre id="payloadPreview">{}</pre>
+    </section>
+
+    <section class="card">
+      <h2>Log</h2>
+      <ul id="log" class="log"></ul>
+    </section>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="app.js"></script>
+</body>
+</html>
