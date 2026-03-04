@@ -43,3 +43,10 @@ Open on iPhone Safari: `http://<your-ip>:8080`
   }
 }
 ```
+
+
+## Troubleshooting (Safari)
+
+- If map CDN is blocked, the app now shows a fallback message and still lets you route/send payload without map rendering.
+- Ensure iPhone and host are on same Wi-Fi and use `http://<your-ip>:8080` (not localhost).
+- Allow Location permission in Safari.

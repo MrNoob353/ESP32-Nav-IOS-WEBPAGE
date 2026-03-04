@@ -27,13 +27,20 @@ const el = {
   payloadPreview: document.getElementById('payloadPreview'),
   steps: document.getElementById('steps'),
   log: document.getElementById('log'),
+  mapFallback: document.getElementById('mapFallback'),
 };
 
-const map = L.map('map').setView([0, 0], 2);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '&copy; OpenStreetMap contributors',
-}).addTo(map);
+const hasLeaflet = typeof window.L !== 'undefined';
+const map = hasLeaflet ? L.map('map').setView([0, 0], 2) : null;
+if (hasLeaflet) {
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(map);
+} else {
+  document.getElementById('map').style.display = 'none';
+  el.mapFallback.classList.remove('hidden');
+}
 
 function log(msg) {
   const li = document.createElement('li');
@@ -63,12 +70,14 @@ function bearing(lat1, lon1, lat2, lon2) {
 function setCurrentLocation(lat, lon, label = 'My location') {
   state.current = { lat, lon, label };
   el.currentLabel.value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+  if (!hasLeaflet) return;
   if (state.currentMarker) state.currentMarker.setLatLng([lat, lon]);
   else state.currentMarker = L.marker([lat, lon]).addTo(map).bindPopup('Current location');
 }
 
 function setDestination(lat, lon, name) {
   state.destination = { lat, lon, name };
+  if (!hasLeaflet) return;
   if (state.destinationMarker) state.destinationMarker.setLatLng([lat, lon]);
   else state.destinationMarker = L.marker([lat, lon]).addTo(map).bindPopup('Destination');
 }
@@ -115,6 +124,7 @@ async function fetchRoute(current, destination) {
 }
 
 function renderRoute(route) {
+  if (!hasLeaflet) return;
   if (state.routeLine) state.routeLine.remove();
   const latLngs = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
   state.routeLine = L.polyline(latLngs, { color: '#38bdf8', weight: 4 }).addTo(map);
@@ -205,7 +215,7 @@ function detectCurrentLocation() {
   navigator.geolocation.getCurrentPosition(
     ({ coords }) => {
       setCurrentLocation(coords.latitude, coords.longitude);
-      map.setView([coords.latitude, coords.longitude], 14);
+      if (hasLeaflet) map.setView([coords.latitude, coords.longitude], 14);
       log('Current location detected');
     },
     (error) => {
