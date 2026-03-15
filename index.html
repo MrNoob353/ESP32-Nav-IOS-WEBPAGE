@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 Navigation Bridge</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+      #controls {
+        padding: 12px;
+        display: grid;
+        gap: 8px;
+        background: #1d1f22;
+        color: #f8f8f8;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      input,
+      button {
+        padding: 8px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+      }
+      button {
+        cursor: pointer;
+      }
+      #map {
+        flex: 1;
+        min-height: 50vh;
+      }
+      #status {
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <section id="controls">
+      <div class="row">
+        <label for="espIp">ESP32 IP:</label>
+        <input id="espIp" type="text" value="192.168.1.50" placeholder="192.168.x.x" />
+      </div>
+      <div class="row">
+        <label for="destination">Destination (lat,lng):</label>
+        <input id="destination" type="text" placeholder="37.7793,-122.4192" />
+        <button id="setRouteBtn">Set Route</button>
+      </div>
+      <div id="status">Status: Ready.</div>
+    </section>
+    <div id="map"></div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const map = L.map("map").setView([37.7749, -122.4194], 13);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(map);
+
+      const state = {
+        userLatLng: null,
+        routeLine: null,
+        routeSteps: [],
+        currentStepIndex: 0,
+        lastPushedStepIndex: -1,
+        userMarker: null,
+      };
+
+      const statusEl = document.getElementById("status");
+      const destinationInput = document.getElementById("destination");
+      const espIpInput = document.getElementById("espIp");
+      const setRouteBtn = document.getElementById("setRouteBtn");
+
+      function setStatus(message) {
+        statusEl.textContent = `Status: ${message}`;
+      }
+
+      function parseLatLng(input) {
+        const [latRaw, lngRaw] = input.split(",").map((p) => p.trim());
+        const lat = Number(latRaw);
+        const lng = Number(lngRaw);
+        if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+        return { lat, lng };
+      }
+
+      function normalizeTurn(maneuverType, modifier) {
+        if (modifier && ["left", "right", "straight"].includes(modifier)) {
+          return modifier;
+        }
+        if (maneuverType === "arrive") return "arrive";
+        if (maneuverType === "depart") return "depart";
+        return "straight";
+      }
+
+      function getStepInstruction(step) {
+        const maneuver = step.maneuver || {};
+        const turn = normalizeTurn(maneuver.type, maneuver.modifier);
+        return {
+          turn,
+          dist_meters: Math.round(step.distance || 0),
+          street: step.name || "Unnamed road",
+        };
+      }
+
+      async function pushToESP32(instruction) {
+        const ip = espIpInput.value.trim();
+        const endpoint = `http://${ip}/nav`;
+
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(instruction),
+          });
+
+          if (!response.ok) {
+            const body = await response.text();
+            throw new Error(`ESP32 responded ${response.status}: ${body}`);
+          }
+
+          setStatus(`Sent to ESP32: ${JSON.stringify(instruction)}`);
+        } catch (error) {
+          console.error("Failed to push data to ESP32", error);
+          setStatus(`ESP32 push failed: ${error.message}`);
+        }
+      }
+
+      async function fetchRoute(start, destination) {
+        const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson&steps=true`;
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`OSRM request failed (${response.status})`);
+        }
+
+        const data = await response.json();
+        if (!data.routes || !data.routes.length) {
+          throw new Error("No route found.");
+        }
+
+        const route = data.routes[0];
+        state.routeSteps = route.legs.flatMap((leg) => leg.steps);
+        state.currentStepIndex = 0;
+        state.lastPushedStepIndex = -1;
+
+        if (state.routeLine) {
+          map.removeLayer(state.routeLine);
+        }
+
+        state.routeLine = L.geoJSON(route.geometry).addTo(map);
+        map.fitBounds(state.routeLine.getBounds(), { padding: [20, 20] });
+
+        setStatus(`Route loaded with ${state.routeSteps.length} steps.`);
+      }
+
+      function updateUserLocation(lat, lng) {
+        state.userLatLng = L.latLng(lat, lng);
+
+        if (!state.userMarker) {
+          state.userMarker = L.marker(state.userLatLng).addTo(map).bindPopup("You are here");
+        } else {
+          state.userMarker.setLatLng(state.userLatLng);
+        }
+
+        evaluateNextManeuver();
+      }
+
+      function evaluateNextManeuver() {
+        if (!state.routeSteps.length || !state.userLatLng) return;
+
+        const step = state.routeSteps[state.currentStepIndex];
+        if (!step || !step.maneuver || !step.maneuver.location) return;
+
+        const [maneuverLng, maneuverLat] = step.maneuver.location;
+        const maneuverLatLng = L.latLng(maneuverLat, maneuverLng);
+        const distance = state.userLatLng.distanceTo(maneuverLatLng);
+        const instruction = getStepInstruction(step);
+
+        setStatus(
+          `Next: ${instruction.turn} on ${instruction.street} in ${Math.round(distance)}m (step ${
+            state.currentStepIndex + 1
+          }/${state.routeSteps.length})`
+        );
+
+        const PUSH_THRESHOLD_METERS = 120;
+        const ADVANCE_THRESHOLD_METERS = 25;
+
+        if (distance <= PUSH_THRESHOLD_METERS && state.lastPushedStepIndex !== state.currentStepIndex) {
+          pushToESP32({
+            ...instruction,
+            dist_meters: Math.round(distance),
+          });
+          state.lastPushedStepIndex = state.currentStepIndex;
+        }
+
+        if (distance <= ADVANCE_THRESHOLD_METERS && state.currentStepIndex < state.routeSteps.length - 1) {
+          state.currentStepIndex += 1;
+        }
+      }
+
+      setRouteBtn.addEventListener("click", async () => {
+        const destination = parseLatLng(destinationInput.value);
+        if (!destination) {
+          setStatus("Invalid destination. Use lat,lng format.");
+          return;
+        }
+
+        if (!state.userLatLng) {
+          setStatus("Waiting for user GPS location before routing.");
+          return;
+        }
+
+        try {
+          setStatus("Fetching route from OSRM...");
+          await fetchRoute(state.userLatLng, destination);
+        } catch (error) {
+          console.error(error);
+          setStatus(`Route fetch failed: ${error.message}`);
+        }
+      });
+
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(
+          (pos) => {
+            updateUserLocation(pos.coords.latitude, pos.coords.longitude);
+          },
+          (error) => {
+            setStatus(`GPS error (${error.code}): ${error.message}`);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 3000,
+            timeout: 8000,
+          }
+        );
+      } else {
+        setStatus("Geolocation is not supported in this browser.");
+      }
+
+      // Expose for manual testing in browser console.
+      window.pushToESP32 = pushToESP32;
+    </script>
+  </body>
+</html>
